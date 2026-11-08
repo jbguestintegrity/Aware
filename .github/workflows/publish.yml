@@ -1,0 +1,55 @@
+# Publishes the study tool to GitHub Pages on every upload (push) to main.
+# It lists every image in the passage folders (media.json), stamps the date
+# (version.json) and the cache version (sw.js), then deploys the site.
+name: Publish
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: List images and stamp version
+        run: |
+          python3 - <<'PY'
+          import os, json, datetime
+          exts = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif')
+          files = []
+          for root, dirs, names in os.walk('.'):
+              dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('lib', 'icons')]
+              if root == '.':
+                  continue
+              for n in names:
+                  if n.lower().endswith(exts):
+                      files.append(os.path.relpath(os.path.join(root, n), '.').replace(os.sep, '/'))
+          files.sort()
+          now = datetime.datetime.now(datetime.timezone.utc)
+          build = now.strftime('%Y%m%d%H%M%S')
+          json.dump({'files': files}, open('media.json', 'w'))
+          json.dump({'build': build, 'built': now.isoformat()}, open('version.json', 'w'))
+          sw = open('sw.js').read().replace('__BUILD__', build)
+          open('sw.js', 'w').write(sw)
+          print(len(files), 'images; build', build)
+          PY
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
